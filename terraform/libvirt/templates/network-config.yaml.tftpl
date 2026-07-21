@@ -1,0 +1,40 @@
+# This is cloud-init Network Config Version 2.
+#
+# Terraform replaces the placeholders with the network information
+# belonging to each virtual machine.
+#
+# We match the network interface by its unique MAC address instead
+# of assuming Ubuntu will always assign the same interface name.
+
+version: 2
+
+ethernets:
+  primary:
+    # Find the VM network interface using its assigned MAC address.
+    match:
+      macaddress: "${mac_address}"
+
+    # Give the matched interface a consistent name inside the VM.
+    set-name: eth0
+
+    # Disable DHCP because every Kubernetes node uses a static IP.
+    dhcp4: false
+    dhcp6: false
+
+    # Assign the node's static IPv4 address.
+    addresses:
+      - "${ip_address}/${network_prefix}"
+
+    # Configure the default route through the libvirt NAT gateway.
+    routes:
+      - to: default
+        via: "${gateway}"
+
+    # Configure DNS resolution and the internal search domain.
+    nameservers:
+      addresses:
+%{ for dns_server in dns_servers ~}
+        - "${dns_server}"
+%{ endfor ~}
+      search:
+        - "${domain_name}"

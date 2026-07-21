@@ -1,0 +1,80 @@
+#cloud-config
+
+# This template configures the operating system when a VM boots
+# for the first time.
+#
+# Terraform replaces the placeholders in this template with values
+# supplied separately for each VM.
+
+preserve_hostname: false
+hostname: ${hostname}
+fqdn: ${hostname}.${domain_name}
+manage_etc_hosts: true
+
+# Configure the administrative user.
+#
+# Password login is disabled. Access is provided using the dedicated
+# Ever Presence Haven SSH public key.
+users:
+  - name: ${ssh_user}
+    groups:
+      - adm
+      - sudo
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Disable insecure SSH password and direct root login.
+ssh_pwauth: false
+disable_root: true
+
+# Set the local timezone inside the VM.
+timezone: ${timezone}
+
+# Refresh the Ubuntu package index during first boot.
+#
+# We are not performing a complete operating-system upgrade here
+# because that could make first boot slower or trigger a reboot.
+package_update: true
+package_upgrade: false
+
+# Install only the common baseline tools needed on every node.
+#
+# Kubernetes and containerd will be installed later through Ansible.
+packages:
+  - qemu-guest-agent
+  - curl
+  - vim
+  - jq
+  - nfs-common
+  - socat
+  - conntrack
+
+# Expand the root partition and filesystem to use the larger
+# 40 GiB or 60 GiB QCOW2 disk created by Terraform.
+growpart:
+  mode: auto
+  devices:
+    - /
+
+resize_rootfs: true
+
+# Write a small information file inside each VM.
+# This helps us identify the node and its intended Kubernetes role.
+write_files:
+  - path: /etc/eph-node-info
+    owner: root:root
+    permissions: "0644"
+    content: |
+      NODE_NAME=${hostname}
+      NODE_ROLE=${node_role}
+      PROVISIONED_BY=Terraform_and_cloud-init
+
+# Commands executed near the end of the first cloud-init run.
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - touch /var/lib/eph-cloud-init-complete
+
+final_message: "Cloud-init completed for ${hostname} after $UPTIME seconds."
