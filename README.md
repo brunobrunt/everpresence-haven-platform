@@ -18,3 +18,9 @@ Phase 1: Provisioning three Kubernetes control-plane nodes and two worker nodes 
 Detailed Terraform documentation is available in:
 
 `terraform/libvirt/README.md`
+
+Phase 2: Using Ansible to validate and configure three Kubernetes
+control-plane nodes and two worker nodes.
+
+Terraform provisioning and cloud-init bootstrap are complete.
+All five nodes have passed the Ansible preflight validation.
