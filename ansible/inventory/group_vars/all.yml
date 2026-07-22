@@ -1,0 +1,12 @@
+---
+# Shared variables for the Ever Presence Haven Kubernetes lab.
+
+cluster_gateway: "172.16.10.1"
+cluster_network: "172.16.10.0/24"
+
+# Minimum requirements used by the preflight validation.
+control_plane_minimum_memory_mb: 3500
+worker_minimum_memory_mb: 7500
+
+control_plane_minimum_disk_gib: 35
+worker_minimum_disk_gib: 55
