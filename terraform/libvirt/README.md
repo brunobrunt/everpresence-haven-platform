@@ -871,4 +871,96 @@ Expected validation result:
 ```text
 Success! The configuration is valid.
 ```
+## Successful Infrastructure Deployment
+
+Terraform successfully provisioned the initial Ever Presence Haven Kubernetes lab environment.
+
+### Deployed virtual machines
+
+| Node           | Role          |     IP address | vCPU | Memory |   Disk |
+| -------------- | ------------- | -------------: | ---: | -----: | -----: |
+| `eph-cp01`     | Control plane | `172.16.10.31` |    2 |  4 GiB | 40 GiB |
+| `eph-cp02`     | Control plane | `172.16.10.32` |    2 |  4 GiB | 40 GiB |
+| `eph-cp03`     | Control plane | `172.16.10.33` |    2 |  4 GiB | 40 GiB |
+| `eph-worker01` | Worker        | `172.16.10.34` |    2 |  8 GiB | 60 GiB |
+| `eph-worker02` | Worker        | `172.16.10.35` |    2 |  8 GiB | 60 GiB |
+
+A third worker is reserved for future horizontal scaling:
+
+```text
+eph-worker03
+172.16.10.36
+```
+
+### Terraform-managed resources
+
+Terraform currently tracks 22 resources:
+
+```text
+1 libvirt storage pool
+6 QCOW2 storage volumes
+5 generated cloud-init disks
+5 uploaded cloud-init ISO volumes
+5 KVM virtual machines
+```
+
+The resource count was verified with:
+
+```bash
+terraform state list | wc -l
+```
+
+Result:
+
+```text
+22
+```
+
+### Cloud-init validation
+
+Cloud-init completed successfully on all five nodes.
+
+The following items were verified:
+
+* Correct hostnames
+* Correct static IP addresses
+* Correct control-plane and worker roles
+* SSH key authentication
+* QEMU guest agent running
+* Root filesystem expansion
+* Default gateway configuration
+* Cloud-init completion without errors
+
+Example validation results from `eph-cp01`:
+
+```text
+Hostname: eph-cp01
+IP: 172.16.10.31
+Cloud-init: done
+Guest agent: active
+Node role: control-plane
+Root filesystem: approximately 38 GiB usable
+```
+
+Worker nodes received approximately 58 GiB of usable root filesystem capacity from their 60 GiB virtual disks.
+
+### Idempotency
+
+After deployment, Terraform reported:
+
+```text
+No changes. Your infrastructure matches the configuration.
+```
+
+This confirms that the Terraform configuration, state file and real libvirt infrastructure are synchronized.
+
+### Git milestone
+
+The initial Terraform infrastructure was committed to Git with:
+
+```text
+Provision Kubernetes lab infrastructure with Terraform
+```
+
+The repository uses the `main` branch.
 
