@@ -765,6 +765,198 @@ CoreDNS
 pause
 etcd
 ```
+## Rotate and Store kubeadm Join Credentials
+
+After `kubeadm init`, kubeadm generates temporary credentials used to join additional control-plane and worker nodes.
+
+These credentials must be treated as secrets.
+
+Do not commit them to GitHub, paste them into documentation, or share them publicly.
+
+### Understand the Tokens
+
+List the current kubeadm tokens:
+
+```bash
+sudo kubeadm token list
+```
+
+A token with these usages:
+
+```text
+authentication,signing
+```
+
+is used by new nodes during `kubeadm join`.
+
+A token with a description similar to:
+
+```text
+Proxy for managing TTL for the kubeadm-certs secret
+```
+
+manages the temporary lifetime of the uploaded control-plane certificates.
+
+The uploaded certificates normally remain available for approximately two hours.
+
+### Delete an Exposed Join Token
+
+When a join token has been displayed publicly or shared accidentally, delete it.
+
+Use the first six characters of the token:
+
+```bash
+sudo kubeadm token delete <TOKEN_ID>
+```
+
+Example format:
+
+```text
+abcdef
+```
+
+Verify that it was removed:
+
+```bash
+sudo kubeadm token list
+```
+
+### Generate a New Certificate Key
+
+Additional control-plane nodes require access to the shared Kubernetes certificates.
+
+Generate a new certificate key and re-upload the certificates:
+
+```bash
+sudo kubeadm init phase upload-certs --upload-certs
+```
+
+The command prints a long hexadecimal certificate key.
+
+Keep this key private. It can decrypt sensitive control-plane certificate data.
+
+### Generate a New Control-Plane Join Command
+
+Use the new certificate key to create a temporary control-plane join command:
+
+```bash
+sudo kubeadm token create \
+  --ttl 2h \
+  --print-join-command \
+  --certificate-key <NEW_CERTIFICATE_KEY>
+```
+
+This command is used on:
+
+```text
+eph-cp02
+eph-cp03
+```
+
+The generated command includes:
+
+```text
+--control-plane
+--certificate-key
+```
+
+These options tell kubeadm that the joining node will become another Kubernetes control-plane node.
+
+### Generate a Worker Join Command
+
+Create a separate join command for the worker nodes:
+
+```bash
+sudo kubeadm token create \
+  --ttl 2h \
+  --print-join-command
+```
+
+This command is used on:
+
+```text
+eph-worker01
+eph-worker02
+```
+
+Worker nodes do not require:
+
+```text
+--control-plane
+--certificate-key
+```
+
+### Store Join Commands Securely
+
+Store the generated control-plane and worker join commands in a root-only file on `eph-cp01`:
+
+```bash
+sudo vim /root/kubeadm-join-commands.txt
+```
+
+After pasting the commands, restrict access:
+
+```bash
+sudo chmod 600 /root/kubeadm-join-commands.txt
+```
+
+Permissions `600` mean:
+
+```text
+root can read and write
+all other users have no access
+```
+
+View the file only when joining nodes:
+
+```bash
+sudo cat /root/kubeadm-join-commands.txt
+```
+
+Do not add this file to Git.
+
+### Credential Lifetime
+
+The join token and uploaded certificate data are temporary.
+
+For this project, the replacement credentials are created with:
+
+```text
+TTL: 2 hours
+```
+
+The additional control-plane nodes should be joined within this period.
+
+When the credentials expire, generate new ones using:
+
+```bash
+sudo kubeadm init phase upload-certs --upload-certs
+```
+
+and:
+
+```bash
+sudo kubeadm token create \
+  --ttl 2h \
+  --print-join-command
+```
+
+### Security Summary
+
+```text
+Join token       = allows a node to request cluster membership
+Certificate key  = decrypts uploaded control-plane certificates
+Join command     = contains temporary cluster credentials
+```
+
+Never commit or publicly share:
+
+* kubeadm join tokens
+* discovery-token hashes combined with valid tokens
+* certificate keys
+* `/root/kubeadm-join-commands.txt`
+* kubeadm initialization output containing credentials
+
 
 ## Calico Networking Plan
 
