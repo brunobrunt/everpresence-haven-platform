@@ -1,0 +1,577 @@
+# Ansible Configuration Management
+
+This directory contains the Ansible configuration used to prepare and configure the Ever Presence Haven Kubernetes cluster.
+
+Terraform creates the virtual machines. Ansible connects to those machines over SSH and configures the operating system, container runtime, Kubernetes packages, shared API endpoint, kube-vip, and kubeadm settings.
+
+## Cluster Nodes
+
+| Node           | Role          | IP address     |
+| -------------- | ------------- | -------------- |
+| `eph-cp01`     | Control plane | `172.16.10.31` |
+| `eph-cp02`     | Control plane | `172.16.10.32` |
+| `eph-cp03`     | Control plane | `172.16.10.33` |
+| `eph-worker01` | Worker        | `172.16.10.34` |
+| `eph-worker02` | Worker        | `172.16.10.35` |
+
+The shared Kubernetes API endpoint is:
+
+```text
+k8s-api.lab:6443
+172.16.10.30
+```
+
+## Directory Structure
+
+```text
+ansible/
+├── ansible.cfg
+├── inventory/
+│   ├── hosts.yml
+│   └── group_vars/
+│       └── all.yml
+├── playbooks/
+│   ├── preflight.yml
+│   ├── prepare_nodes.yml
+│   ├── install_crio.yml
+│   ├── install_kubernetes_packages.yml
+│   ├── configure_cluster_endpoint.yml
+│   ├── prepare_kube_vip.yml
+│   └── prepare_kubeadm_init.yml
+├── roles/
+│   ├── kubernetes_prerequisites/
+│   ├── crio/
+│   ├── kubernetes_packages/
+│   ├── cluster_endpoint/
+│   ├── kube_vip/
+│   └── kubeadm_init/
+└── README.md
+```
+
+## Ansible Concepts
+
+### Playbook
+
+A playbook decides which hosts and roles Ansible should run.
+
+Example:
+
+```yaml
+- name: Install CRI-O
+  hosts: all
+  become: true
+
+  roles:
+    - crio
+```
+
+### Role
+
+A role is a reusable collection of tasks and files used to configure one specific service or part of a system.
+
+Examples in this project:
+
+```text
+crio
+kubernetes_packages
+kube_vip
+kubeadm_init
+```
+
+### Task
+
+A task is one individual action performed by Ansible.
+
+A task may:
+
+* Install a package
+* Create a file
+* Start a service
+* Run a command
+* Validate a configuration
+
+### Handler
+
+A handler is a special task that runs only when another task notifies it.
+
+Handlers are commonly used to restart a service or refresh a package cache after a configuration file changes.
+
+```text
+Task    = performs an action
+Handler = reacts to a change
+```
+
+### Inventory
+
+The inventory defines the hosts Ansible manages and organizes them into groups.
+
+This project uses:
+
+```text
+control_plane
+workers
+```
+
+### Variables
+
+Shared variables are stored in:
+
+```text
+inventory/group_vars/all.yml
+```
+
+Examples include:
+
+```yaml
+kubernetes_minor_version: "v1.36"
+kubernetes_version: "v1.36.2"
+crio_version: "v1.36"
+control_plane_vip: "172.16.10.30"
+pod_network_cidr: "10.244.0.0/16"
+service_network_cidr: "10.96.0.0/12"
+```
+
+## Ansible Ad Hoc Commands
+
+An ad hoc command performs a single action without creating a playbook.
+
+Example:
+
+```bash
+ansible eph-cp01 -b -m command -a "systemctl is-active crio"
+```
+
+Command flags:
+
+```text
+-b = become root using sudo
+-m = choose the Ansible module
+-a = provide arguments to the module
+```
+
+The command above means:
+
+```text
+Connect to eph-cp01
+Use sudo
+Use the command module
+Run systemctl is-active crio
+```
+
+## Configuration Workflow
+
+### 1. Inventory and Connectivity
+
+Display the inventory:
+
+```bash
+ansible-inventory --graph
+```
+
+Test connectivity:
+
+```bash
+ansible all -m ping
+```
+
+Ansible ping verifies:
+
+* SSH connectivity
+* SSH-key authentication
+* Python availability
+* Ansible module execution
+
+### 2. Preflight Validation
+
+Playbook:
+
+```text
+playbooks/preflight.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/preflight.yml
+```
+
+The preflight playbook checks:
+
+* Ubuntu version
+* CPU capacity
+* Memory capacity
+* Disk capacity
+* Static IP addresses
+* Default gateway
+* Swap status
+* Cloud-init completion
+* QEMU guest agent
+* Time synchronization
+* DNS resolution
+
+All five nodes passed the preflight checks.
+
+### 3. Kubernetes Operating-System Prerequisites
+
+Playbook:
+
+```text
+playbooks/prepare_nodes.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/prepare_nodes.yml
+```
+
+This playbook:
+
+* Keeps swap disabled
+* Loads the `overlay` kernel module
+* Loads the `br_netfilter` kernel module
+* Enables IPv4 forwarding
+* Enables bridged traffic processing
+
+The required sysctl settings are:
+
+```text
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+```
+
+### 4. CRI-O Container Runtime
+
+Playbook:
+
+```text
+playbooks/install_crio.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/install_crio.yml
+```
+
+CRI-O is the container runtime used by Kubernetes.
+
+Its CRI socket is:
+
+```text
+unix:///run/crio/crio.sock
+```
+
+Validation commands:
+
+```bash
+ansible all -b -m command -a "systemctl is-active crio"
+ansible all -b -m command -a "crio --version"
+ansible all -b -m command -a "crictl info"
+```
+
+### 5. Kubernetes Packages
+
+Playbook:
+
+```text
+playbooks/install_kubernetes_packages.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/install_kubernetes_packages.yml
+```
+
+The role installs:
+
+```text
+kubeadm
+kubelet
+kubectl
+```
+
+Purpose of each package:
+
+```text
+kubeadm = initializes or joins a Kubernetes cluster
+kubelet = runs Kubernetes workloads on each node
+kubectl = manages the Kubernetes cluster
+```
+
+The installed version is:
+
+```text
+v1.36.2
+```
+
+The packages are placed on hold to prevent uncontrolled automatic upgrades.
+
+Verify:
+
+```bash
+ansible all -b -m command -a "kubeadm version -o short"
+ansible all -b -m command -a "kubelet --version"
+ansible all -b -m command -a "kubectl version --client=true"
+```
+
+### 6. Shared Kubernetes API Endpoint
+
+Playbook:
+
+```text
+playbooks/configure_cluster_endpoint.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/configure_cluster_endpoint.yml
+```
+
+This adds the following entry to `/etc/hosts` on every node:
+
+```text
+172.16.10.30 k8s-api.lab
+```
+
+The shared endpoint is:
+
+```text
+k8s-api.lab:6443
+```
+
+The real control-plane addresses remain:
+
+```text
+eph-cp01: 172.16.10.31
+eph-cp02: 172.16.10.32
+eph-cp03: 172.16.10.33
+```
+
+### 7. kube-vip Preparation
+
+Playbook:
+
+```text
+playbooks/prepare_kube_vip.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/prepare_kube_vip.yml
+```
+
+kube-vip provides the virtual IP:
+
+```text
+172.16.10.30
+```
+
+The kube-vip manifest is stored at:
+
+```text
+/etc/kubernetes/manifests/kube-vip.yaml
+```
+
+It runs as a static Pod.
+
+A static Pod is started directly by kubelet from a YAML file. It does not require the Kubernetes API server to already exist.
+
+This allows kube-vip to advertise the shared API address while the cluster is being initialized.
+
+### 8. kubeadm Configuration
+
+Playbook:
+
+```text
+playbooks/prepare_kubeadm_init.yml
+```
+
+Run:
+
+```bash
+ansible-playbook playbooks/prepare_kubeadm_init.yml
+```
+
+The generated kubeadm configuration is stored at:
+
+```text
+/etc/kubernetes/kubeadm-init.yaml
+```
+
+Important settings include:
+
+```text
+Kubernetes version: v1.36.2
+Local API endpoint: 172.16.10.31:6443
+Shared API endpoint: k8s-api.lab:6443
+CRI socket: unix:///run/crio/crio.sock
+Pod network: 10.244.0.0/16
+Service network: 10.96.0.0/12
+```
+
+The configuration is validated using:
+
+```bash
+kubeadm config validate \
+  --config /etc/kubernetes/kubeadm-init.yaml
+```
+
+## Pre-pulling Kubernetes Images
+
+Before initializing the first control-plane node, the required Kubernetes images are downloaded in advance:
+
+```bash
+ansible eph-cp01 -b -m command -a \
+  "kubeadm config images pull --config /etc/kubernetes/kubeadm-init.yaml"
+```
+
+This step is optional because `kubeadm init` can download the images automatically.
+
+Pre-pulling provides several benefits:
+
+* Confirms that CRI-O is working
+* Confirms that the Kubernetes registry is reachable
+* Detects DNS or internet-access problems early
+* Prevents image-download delays during initialization
+* Separates image-download errors from cluster-bootstrap errors
+
+```text
+kubeadm config images pull = download Kubernetes images
+kubeadm init               = create the control plane
+```
+
+The following images were downloaded:
+
+```text
+kube-apiserver
+kube-controller-manager
+kube-scheduler
+kube-proxy
+CoreDNS
+pause
+etcd
+```
+
+## Calico Networking Plan
+
+Calico will provide Kubernetes Pod networking and network policies.
+
+The planned networks are:
+
+```text
+Node network:     172.16.10.0/24
+Kubernetes VIP:   172.16.10.30
+Pod network:      10.244.0.0/16
+Service network:  10.96.0.0/12
+```
+
+Calico will use VXLAN encapsulation.
+
+VXLAN wraps Pod traffic inside normal node-to-node traffic, allowing Pods on different Kubernetes nodes to communicate.
+
+```text
+Pod traffic
+    ↓
+Wrapped inside node traffic
+    ↓
+Travels across 172.16.10.0/24
+    ↓
+Unwrapped on the destination node
+```
+
+## Idempotency
+
+Ansible playbooks should be safe to run more than once.
+
+The first run may report:
+
+```text
+changed=3
+```
+
+The second run should ideally report:
+
+```text
+changed=0
+failed=0
+unreachable=0
+```
+
+This confirms that the system is already in the desired state and Ansible does not make unnecessary changes.
+
+## YAML Validation
+
+Before running a new playbook:
+
+```bash
+ansible-playbook --syntax-check playbooks/PLAYBOOK_NAME.yml
+```
+
+List the targeted hosts:
+
+```bash
+ansible-playbook playbooks/PLAYBOOK_NAME.yml --list-hosts
+```
+
+Check for incorrect YAML asterisk markers:
+
+```bash
+grep -RIn '^[[:space:]]*\* ' roles playbooks \
+  || echo "No invalid YAML asterisk markers found"
+```
+
+YAML list items must begin with:
+
+```yaml
+- name: Example task
+```
+
+not:
+
+```yaml
+* name: Example task
+```
+
+## Security Notes
+
+Do not commit:
+
+* SSH private keys
+* Kubernetes join tokens
+* Certificate keys
+* `admin.conf`
+* `super-admin.conf`
+* kubeadm initialization output containing credentials
+
+Temporary kubeadm output should remain protected and outside Git.
+
+## Current Status
+
+Completed:
+
+* Ansible inventory
+* Connectivity testing
+* Node preflight validation
+* Kubernetes operating-system prerequisites
+* CRI-O installation
+* Kubernetes package installation
+* Shared API endpoint configuration
+* kube-vip manifest preparation
+* kubeadm initialization configuration
+* Kubernetes image pre-pull
+
+Next:
+
+1. Run kubeadm preflight validation
+2. Initialize `eph-cp01`
+3. Configure kubectl
+4. Install Calico
+5. Join `eph-cp02` and `eph-cp03`
+6. Join `eph-worker01` and `eph-worker02`
+7. Validate high availability and Pod networking
+
