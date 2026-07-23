@@ -74,6 +74,28 @@
     name: cri-o
     state: present
 
+# Create the directory used for custom CRI-O configuration.
+- name: Create CRI-O configuration directory
+  ansible.builtin.file:
+    path: /etc/crio/crio.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Configure CRI-O to use the same pause image as kubeadm.
+# The pause container creates the shared network environment
+# used by all containers inside a Kubernetes Pod.
+- name: Configure CRI-O pause image
+  ansible.builtin.copy:
+    dest: /etc/crio/crio.conf.d/10-pause-image.conf
+    content: |
+      [crio.image]
+      pause_image = "{{ kubernetes_pause_image }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart CRI-O
 - name: Enable and start the CRI-O service
   ansible.builtin.systemd_service:
     name: crio

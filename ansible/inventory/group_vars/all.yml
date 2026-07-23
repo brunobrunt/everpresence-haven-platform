@@ -16,6 +16,10 @@ kubernetes_minor_version: "v1.36"
 crio_version: "v1.36"
 crictl_version: "v1.36.0"
 
+# Small infrastructure image used to create each Pod sandbox.
+# This version matches the image expected by kubeadm v1.36.2.
+kubernetes_pause_image: "registry.k8s.io/pause:3.10.2"
+
 # CRI-O runtime socket used by kubeadm, kubelet, and crictl.
 crio_socket: "unix:///run/crio/crio.sock"
 
