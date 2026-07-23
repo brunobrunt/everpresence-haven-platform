@@ -1,0 +1,10 @@
+---
+# Configure the shared Kubernetes API name on all cluster nodes.
+
+- name: Configure Kubernetes API endpoint
+  hosts: all
+  become: true
+  gather_facts: false
+
+  roles:
+    - cluster_endpoint

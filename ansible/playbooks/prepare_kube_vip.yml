@@ -1,0 +1,13 @@
+---
+# Prepare kube-vip on the first control-plane node only.
+#
+# The remaining control-plane nodes receive the manifest
+# after they join the Kubernetes cluster.
+
+- name: Prepare kube-vip on the first control plane
+  hosts: eph-cp01
+  become: true
+  gather_facts: false
+
+  roles:
+    - kube_vip

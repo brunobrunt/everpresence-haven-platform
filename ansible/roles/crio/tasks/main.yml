@@ -1,0 +1,169 @@
+---
+# An Ansible role is a reusable collection of tasks and files
+# used to configure one specific service or part of a system.
+#
+# This CRI-O role installs, configures, starts, and validates
+# the CRI-O container runtime on every Kubernetes node.
+#
+# Tasks are the individual steps Ansible performs.
+# Each task does one action, such as installing a package,
+# creating a file, or starting a service.
+
+- name: Install CRI-O repository dependencies
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - software-properties-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the CRI-O repository signing key
+  ansible.builtin.get_url:
+    url: "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/{{ crio_version }}/deb/Release.key"
+    dest: /tmp/cri-o-release.key
+    owner: root
+    group: root
+    mode: "0644"
+  register: crio_repository_key
+
+- name: Check whether the CRI-O GPG keyring exists
+  ansible.builtin.stat:
+    path: /etc/apt/keyrings/cri-o-apt-keyring.gpg
+  register: crio_gpg_keyring
+
+- name: Convert the CRI-O signing key to GPG format
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --yes
+      - --dearmor
+      - --output
+      - /etc/apt/keyrings/cri-o-apt-keyring.gpg
+      - /tmp/cri-o-release.key
+  when:
+    - crio_repository_key.changed or not crio_gpg_keyring.stat.exists
+  notify: Refresh APT cache
+
+- name: Configure the CRI-O APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/{{ crio_version }}/deb/ /"
+    filename: cri-o
+    state: present
+    update_cache: false
+  notify: Refresh APT cache
+
+# Run the APT cache handler now so the new repository is
+# available before Ansible attempts to install CRI-O.
+- name: Apply repository handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Install CRI-O
+  ansible.builtin.apt:
+    name: cri-o
+    state: present
+
+- name: Enable and start the CRI-O service
+  ansible.builtin.systemd_service:
+    name: crio
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Check the currently installed crictl version
+  ansible.builtin.command: /usr/local/bin/crictl --version
+  register: crictl_current_version
+  changed_when: false
+  failed_when: false
+
+- name: Download crictl
+  ansible.builtin.get_url:
+    url: "https://github.com/kubernetes-sigs/cri-tools/releases/download/{{ crictl_version }}/crictl-{{ crictl_version }}-linux-{{ crictl_arch }}.tar.gz"
+    dest: "/tmp/crictl-{{ crictl_version }}-linux-{{ crictl_arch }}.tar.gz"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install crictl
+  ansible.builtin.unarchive:
+    src: "/tmp/crictl-{{ crictl_version }}-linux-{{ crictl_arch }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - crictl_current_version.rc != 0 or crictl_version not in crictl_current_version.stdout
+
+- name: Configure crictl to use CRI-O
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    content: |
+      runtime-endpoint: {{ crio_socket }}
+      image-endpoint: {{ crio_socket }}
+      timeout: 10
+      debug: false
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check the CRI-O service status
+  ansible.builtin.command: systemctl is-active crio
+  register: crio_service_status
+  changed_when: false
+
+- name: Check the CRI-O socket
+  ansible.builtin.stat:
+    path: /run/crio/crio.sock
+  register: crio_socket_status
+
+- name: Read the CRI-O version
+  ansible.builtin.command: crio --version
+  register: crio_version_output
+  changed_when: false
+
+- name: Read the crictl version
+  ansible.builtin.command: crictl --version
+  register: crictl_version_output
+  changed_when: false
+
+- name: Test crictl connectivity to CRI-O
+  ansible.builtin.command: crictl info
+  register: crictl_info
+  changed_when: false
+
+- name: Validate the CRI-O installation
+  ansible.builtin.assert:
+    that:
+      - crio_service_status.stdout | trim == "active"
+      - crio_socket_status.stat.exists
+      - crio_socket_status.stat.issock | default(false)
+      - crio_version_output.rc == 0
+      - crictl_version_output.rc == 0
+      - crictl_info.rc == 0
+    success_msg: >-
+      {{ inventory_hostname }} passed all CRI-O runtime checks.
+    fail_msg: >-
+      {{ inventory_hostname }} failed one or more CRI-O
+      runtime checks.
+
+- name: Display the CRI-O validation summary
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ inventory_hostname }}"
+      - "CRI-O service: {{ crio_service_status.stdout | trim }}"
+      - "CRI-O socket: /run/crio/crio.sock"
+      - "CRI-O version: {{ crio_version_output.stdout_lines[0] }}"
+      - "crictl version: {{ crictl_version_output.stdout }}"
+      - "crictl connectivity: working"

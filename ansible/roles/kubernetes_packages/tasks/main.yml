@@ -1,0 +1,119 @@
+---
+# This role installs the main Kubernetes tools on every node.
+#
+# kubeadm = creates or joins a Kubernetes cluster
+# kubelet = runs Kubernetes workloads on each node
+# kubectl  = manages the Kubernetes cluster
+
+# Step 1: Install tools needed to add the Kubernetes repository.
+- name: Install repository requirements
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gpg
+    state: present
+    update_cache: true
+
+# Step 2: Create the directory where repository keys are stored.
+- name: Create APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Step 3: Download the official Kubernetes repository key.
+- name: Download Kubernetes repository key
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/Release.key"
+    dest: /tmp/kubernetes-release.key
+    owner: root
+    group: root
+    mode: "0644"
+
+# Step 4: Convert the downloaded key into the format APT uses.
+- name: Create Kubernetes APT keyring
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --batch
+      - --yes
+      - --dearmor
+      - --output
+      - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      - /tmp/kubernetes-release.key
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+# Step 5: Add the official Kubernetes v1.36 repository.
+- name: Add Kubernetes repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    content: |
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/ /
+    owner: root
+    group: root
+    mode: "0644"
+
+# Step 6: Refresh APT so it can see the Kubernetes packages.
+- name: Refresh APT package cache
+  ansible.builtin.apt:
+    update_cache: true
+
+# Step 7: Install the three Kubernetes packages.
+- name: Install kubelet, kubeadm, and kubectl
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+
+# Step 8: Prevent automatic Kubernetes package upgrades.
+#
+# Kubernetes upgrades must be performed carefully, one version
+# at a time, instead of being installed automatically by APT.
+- name: Hold Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+
+# Step 9: Make kubelet start automatically after a reboot.
+#
+# Kubelet may not stay active yet because kubeadm has not
+# initialized or joined this node to the cluster.
+- name: Enable kubelet service
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+
+# Step 10: Check the installed versions.
+- name: Check kubeadm version
+  ansible.builtin.command: kubeadm version -o short
+  register: kubeadm_version
+  changed_when: false
+
+- name: Check kubelet version
+  ansible.builtin.command: kubelet --version
+  register: kubelet_version
+  changed_when: false
+
+- name: Check kubectl version
+  ansible.builtin.command: kubectl version --client=true
+  register: kubectl_version
+  changed_when: false
+
+# Step 11: Display the results.
+- name: Display Kubernetes package versions
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ inventory_hostname }}"
+      - "kubeadm: {{ kubeadm_version.stdout }}"
+      - "kubelet: {{ kubelet_version.stdout }}"
+      - "kubectl: {{ kubectl_version.stdout_lines[0] }}"

@@ -10,3 +10,63 @@ worker_minimum_memory_mb: 7500
 
 control_plane_minimum_disk_gib: 35
 worker_minimum_disk_gib: 55
+
+# Kubernetes and CRI runtime versions.
+kubernetes_minor_version: "v1.36"
+crio_version: "v1.36"
+crictl_version: "v1.36.0"
+
+# CRI-O runtime socket used by kubeadm, kubelet, and crictl.
+crio_socket: "unix:///run/crio/crio.sock"
+
+# All current VMs use the AMD64 architecture.
+crictl_arch: "amd64"
+
+# Kubernetes minor-version repository.
+# This installs the latest available 1.36.x patch release.
+#kubernetes_minor_version: "v1.36"
+
+# Kubernetes packages installed on every cluster node.
+kubernetes_packages:
+  - kubelet
+  - kubeadm
+  - kubectl
+
+# Shared Kubernetes API endpoint.
+control_plane_endpoint_name: "k8s-api.lab"
+control_plane_vip: "172.16.10.30"
+control_plane_port: 6443
+
+# Network interface used by kube-vip.
+kube_vip_interface: "eth0"    
+
+# kube-vip provides the shared virtual IP for the
+# highly available Kubernetes API endpoint.
+kube_vip_version: "v1.2.1"
+
+kube_vip_image: "ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}"
+
+kube_vip_manifest_path: "/etc/kubernetes/manifests/kube-vip.yaml"
+
+# During kubeadm initialization, kube-vip temporarily
+# uses super-admin.conf to communicate with Kubernetes.
+kube_vip_kubeconfig_host_path: "/etc/kubernetes/super-admin.conf"
+
+# Exact Kubernetes version installed on the nodes.
+kubernetes_version: "v1.36.2"
+
+  
+# Kubernetes networking configuration.
+
+# Calico assigns Pod IP addresses from this network.
+# It must not overlap the VM network 172.16.10.0/24.
+pod_network_cidr: "10.244.0.0/16"
+
+# Kubernetes assigns virtual Service IPs from this network.
+service_network_cidr: "10.96.0.0/12"
+
+# Calico will use VXLAN to connect Pods across nodes.
+# VXLAN creates an overlay network between Kubernetes nodes.
+# It wraps Pod traffic inside normal node-to-node traffic,
+# allowing Pods on different nodes to communicate.
+calico_encapsulation: "VXLAN"  

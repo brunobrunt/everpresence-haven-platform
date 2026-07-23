@@ -1,0 +1,11 @@
+---
+# Prepare and validate the kubeadm configuration
+# on the first control-plane node only.
+
+- name: Prepare kubeadm initialization
+  hosts: eph-cp01
+  become: true
+  gather_facts: false
+
+  roles:
+    - kubeadm_init

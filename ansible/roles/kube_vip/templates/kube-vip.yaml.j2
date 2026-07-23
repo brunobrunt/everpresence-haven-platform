@@ -1,0 +1,97 @@
+---
+# This is a Kubernetes static Pod manifest.
+#
+# A static Pod is started directly by kubelet from:
+# /etc/kubernetes/manifests/
+#
+# kube-vip uses ARP to advertise 172.16.10.30
+# from one active control-plane node.
+
+apiVersion: v1
+kind: Pod
+
+metadata:
+  name: kube-vip
+  namespace: kube-system
+
+spec:
+  containers:
+    - name: kube-vip
+      image: "{{ kube_vip_image }}"
+      imagePullPolicy: IfNotPresent
+
+      args:
+        - manager
+
+      env:
+        # Advertise the VIP using Layer-2 ARP.
+        - name: vip_arp
+          value: "true"
+
+        # Kubernetes API server port.
+        - name: port
+          value: "{{ control_plane_port }}"
+
+        # Interface that will advertise the VIP.
+        - name: vip_interface
+          value: "{{ kube_vip_interface }}"
+
+        # The VIP represents one individual IPv4 address.
+        - name: vip_subnet
+          value: "32"
+
+        # Enable control-plane VIP management.
+        - name: cp_enable
+          value: "true"
+
+        - name: cp_namespace
+          value: "kube-system"
+
+        # We are currently using kube-vip only for the
+        # Kubernetes API, not LoadBalancer Services.
+        - name: svc_enable
+          value: "false"
+
+        # Only one control-plane node should advertise
+        # the VIP at a time.
+        - name: vip_leaderelection
+          value: "true"
+
+        - name: vip_leaseduration
+          value: "5"
+
+        - name: vip_renewdeadline
+          value: "3"
+
+        - name: vip_retryperiod
+          value: "1"
+
+        # Virtual IP advertised by kube-vip.
+        - name: address
+          value: "{{ control_plane_vip }}"
+
+      securityContext:
+        capabilities:
+          add:
+            - NET_ADMIN
+            - NET_RAW
+            - SYS_TIME
+
+      # kube-vip expects its Kubernetes configuration
+      # at /etc/kubernetes/admin.conf inside the container.
+      volumeMounts:
+        - name: kubeconfig
+          mountPath: /etc/kubernetes/admin.conf
+
+  # kube-vip must use the control-plane node's network.
+  hostNetwork: true
+
+  hostAliases:
+    - ip: 127.0.0.1
+      hostnames:
+        - kubernetes
+
+  volumes:
+    - name: kubeconfig
+      hostPath:
+        path: "{{ kube_vip_kubeconfig_host_path }}"

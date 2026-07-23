@@ -1,0 +1,54 @@
+---
+# InitConfiguration contains settings that apply only
+# to the first control-plane node during kubeadm init.
+
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+
+nodeRegistration:
+  # Name that Kubernetes will use for this node.
+  name: eph-cp01
+
+  # Tell kubeadm to use CRI-O as the container runtime.
+  criSocket: "{{ crio_socket }}"
+
+localAPIEndpoint:
+  # The real IP address of eph-cp01.
+  advertiseAddress: "172.16.10.31"
+
+  # Port used by the local Kubernetes API server.
+  bindPort: {{ control_plane_port }}
+
+---
+# ClusterConfiguration contains settings shared by
+# the entire Kubernetes cluster.
+
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+
+# Exact Kubernetes control-plane version.
+kubernetesVersion: "{{ kubernetes_version }}"
+
+# Name used to identify this cluster.
+clusterName: "everpresence-haven"
+
+# Shared HA endpoint used by every node.
+controlPlaneEndpoint: "{{ control_plane_endpoint_name }}:{{ control_plane_port }}"
+
+networking:
+  # IP addresses assigned to Kubernetes Pods.
+  podSubnet: "{{ pod_network_cidr }}"
+
+  # IP addresses assigned to Kubernetes Services.
+  serviceSubnet: "{{ service_network_cidr }}"
+
+  # Internal Kubernetes DNS suffix.
+  dnsDomain: "cluster.local"
+
+apiServer:
+  # Add the shared DNS name and VIP to the API certificate.
+  certSANs:
+    - "{{ control_plane_endpoint_name }}"
+    - "{{ control_plane_vip }}"
+    - "172.16.10.31"
+    - "eph-cp01"

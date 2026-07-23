@@ -1,0 +1,10 @@
+---
+# Apply Kubernetes operating-system prerequisites to every node.
+
+- name: Prepare all nodes for Kubernetes
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - kubernetes_prerequisites

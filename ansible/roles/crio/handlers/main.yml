@@ -1,0 +1,11 @@
+---
+
+# Handlers are special tasks that run only when notified.
+# They are commonly used to restart or reload a service
+# after a configuration file has changed.
+# Handler = reacts to a change
+
+
+- name: Refresh APT cache
+  ansible.builtin.apt:
+    update_cache: true

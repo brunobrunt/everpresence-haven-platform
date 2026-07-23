@@ -1,0 +1,71 @@
+---
+# This role creates and validates the kubeadm configuration
+# for the first control-plane node.
+#
+# It does not initialize the cluster yet.
+
+# Step 1: Confirm the kube-vip manifest exists.
+- name: Check kube-vip manifest
+  ansible.builtin.stat:
+    path: "{{ kube_vip_manifest_path }}"
+  register: kube_vip_manifest
+
+# Step 2: Stop if kube-vip has not been prepared.
+- name: Confirm kube-vip is ready
+  ansible.builtin.assert:
+    that:
+      - kube_vip_manifest.stat.exists
+    success_msg: "The kube-vip manifest is ready."
+    fail_msg: "The kube-vip manifest was not found."
+
+# Step 3: Generate the kubeadm configuration file
+# from the Jinja template.
+- name: Create kubeadm initialization configuration
+  ansible.builtin.template:
+    src: kubeadm-init.yaml.j2
+    dest: /etc/kubernetes/kubeadm-init.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+# Step 4: Ask kubeadm to validate the configuration.
+#
+# This checks for unknown fields, incorrect API versions,
+# and invalid configuration values.
+- name: Validate kubeadm configuration
+  ansible.builtin.command:
+    argv:
+      - kubeadm
+      - config
+      - validate
+      - --config
+      - /etc/kubernetes/kubeadm-init.yaml
+  register: kubeadm_config_validation
+  changed_when: false
+
+# Step 5: Display the images kubeadm will require.
+- name: List required Kubernetes images
+  ansible.builtin.command:
+    argv:
+      - kubeadm
+      - config
+      - images
+      - list
+      - --config
+      - /etc/kubernetes/kubeadm-init.yaml
+  register: kubeadm_required_images
+  changed_when: false
+
+# Step 6: Display the validation results.
+- name: Display kubeadm configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ inventory_hostname }}"
+      - "Kubernetes version: {{ kubernetes_version }}"
+      - "Local API: 172.16.10.31:{{ control_plane_port }}"
+      - "Shared API: {{ control_plane_endpoint_name }}:{{ control_plane_port }}"
+      - "Pod network: {{ pod_network_cidr }}"
+      - "Service network: {{ service_network_cidr }}"
+      - "CRI socket: {{ crio_socket }}"
+      - "Validation: {{ kubeadm_config_validation.stdout | default('successful') }}"
+      - "Required images: {{ kubeadm_required_images.stdout_lines }}"

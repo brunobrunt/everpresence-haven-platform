@@ -1,0 +1,13 @@
+---
+# This playbook installs Kubernetes packages on every node.
+#
+# Playbook = chooses the hosts and role to run.
+# Role     = contains the installation tasks.
+
+- name: Install Kubernetes packages
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - kubernetes_packages

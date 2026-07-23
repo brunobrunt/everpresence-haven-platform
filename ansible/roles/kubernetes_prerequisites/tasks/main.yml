@@ -1,0 +1,101 @@
+---
+# Prepare Ubuntu nodes for Kubernetes.
+#
+# This role:
+# - Disables swap
+# - Prevents swap from returning after reboot
+# - Loads overlay and br_netfilter kernel modules
+# - Enables packet forwarding
+# - Allows bridged traffic to pass through iptables
+
+- name: Disable active swap
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb | int > 0
+  changed_when: true
+
+- name: Remove swap entries from /etc/fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^\s*[^#]\S+\s+\S+\s+swap\s+'
+    state: absent
+    backup: true
+
+- name: Configure Kubernetes kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    content: |
+      overlay
+      br_netfilter
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Load required kernel modules
+  ansible.builtin.command: "modprobe {{ item }}"
+  loop:
+    - overlay
+    - br_netfilter
+  changed_when: false
+
+- name: Configure Kubernetes networking sysctl settings
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes-cri.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl settings
+
+- name: Apply pending handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify swap is disabled
+  ansible.builtin.command: swapon --show --noheadings
+  register: swap_status
+  changed_when: false
+
+- name: Verify overlay module is loaded
+  ansible.builtin.command: grep -w overlay /proc/modules
+  register: overlay_module
+  changed_when: false
+  failed_when: false
+
+- name: Verify br_netfilter module is loaded
+  ansible.builtin.command: grep -w br_netfilter /proc/modules
+  register: br_netfilter_module
+  changed_when: false
+  failed_when: false
+
+- name: Read IPv4 forwarding value
+  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  register: ipv4_forward
+  changed_when: false
+
+- name: Read bridge IPv4 filtering value
+  ansible.builtin.command: sysctl -n net.bridge.bridge-nf-call-iptables
+  register: bridge_ipv4
+  changed_when: false
+
+- name: Read bridge IPv6 filtering value
+  ansible.builtin.command: sysctl -n net.bridge.bridge-nf-call-ip6tables
+  register: bridge_ipv6
+  changed_when: false
+
+- name: Validate Kubernetes operating-system prerequisites
+  ansible.builtin.assert:
+    that:
+      - swap_status.stdout | trim == ""
+      - overlay_module.rc == 0
+      - br_netfilter_module.rc == 0
+      - ipv4_forward.stdout | trim == "1"
+      - bridge_ipv4.stdout | trim == "1"
+      - bridge_ipv6.stdout | trim == "1"
+    success_msg: >-
+      {{ inventory_hostname }} passed the Kubernetes
+      operating-system prerequisite checks.
+    fail_msg: >-
+      {{ inventory_hostname }} failed one or more Kubernetes
+      operating-system prerequisite checks.

@@ -1,0 +1,13 @@
+---
+# Install and validate CRI-O on every Kubernetes node.
+#
+# A playbook decides which hosts and roles Ansible should run.
+# This playbook targets all five nodes and calls the CRI-O role.
+
+- name: Install CRI-O container runtime
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - crio

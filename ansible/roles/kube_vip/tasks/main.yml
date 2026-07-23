@@ -1,0 +1,120 @@
+---
+# This role prepares kube-vip on the first control-plane node.
+#
+# Task = one action Ansible performs.
+# Role = an organized collection of related tasks.
+
+# Step 1: Confirm that the configured interface exists.
+- name: Check kube-vip network interface
+  ansible.builtin.command:
+    argv:
+      - ip
+      - link
+      - show
+      - "{{ kube_vip_interface }}"
+  register: kube_vip_interface_check
+  changed_when: false
+
+# Step 2: Read the current IPv4 addresses on the interface.
+- name: Check existing addresses on kube-vip interface
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -4
+      - address
+      - show
+      - dev
+      - "{{ kube_vip_interface }}"
+  register: kube_vip_existing_addresses
+  changed_when: false
+
+# Step 3: Stop if the reserved VIP is already assigned.
+- name: Confirm the Kubernetes VIP is not already assigned
+  ansible.builtin.assert:
+    that:
+      - control_plane_vip not in kube_vip_existing_addresses.stdout
+    success_msg: >-
+      {{ control_plane_vip }} is available for kube-vip.
+    fail_msg: >-
+      {{ control_plane_vip }} is already assigned to
+      {{ kube_vip_interface }}.
+
+# Step 4: Create the directory monitored by kubelet
+# for static Pod manifests.
+- name: Create Kubernetes static Pod directory
+  ansible.builtin.file:
+    path: /etc/kubernetes/manifests
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Step 5: Download the kube-vip container image
+# through the CRI-O runtime.
+- name: Pull kube-vip container image
+  ansible.builtin.command:
+    argv:
+      - crictl
+      - pull
+      - "{{ kube_vip_image }}"
+  register: kube_vip_image_pull
+  changed_when: false
+
+# Step 6: Build the static Pod manifest from
+# the Jinja template.
+- name: Create kube-vip static Pod manifest
+  ansible.builtin.template:
+    src: kube-vip.yaml.j2
+    dest: "{{ kube_vip_manifest_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+# Step 7: Read the generated manifest from eph-cp01.
+#
+# slurp reads a remote file and returns its contents
+# in Base64 format.
+- name: Read kube-vip manifest
+  ansible.builtin.slurp:
+    src: "{{ kube_vip_manifest_path }}"
+  register: kube_vip_manifest_file
+
+# Step 8: Convert the manifest from YAML text into
+# structured data that Ansible can inspect.
+- name: Parse kube-vip manifest YAML
+  ansible.builtin.set_fact:
+    kube_vip_manifest_data: >-
+      {{
+        kube_vip_manifest_file.content
+        | b64decode
+        | from_yaml
+      }}
+
+# Step 9: Check important fields in the manifest.
+- name: Validate kube-vip manifest
+  ansible.builtin.assert:
+    that:
+      - kube_vip_manifest_data.apiVersion == "v1"
+      - kube_vip_manifest_data.kind == "Pod"
+      - kube_vip_manifest_data.metadata.name == "kube-vip"
+      - kube_vip_manifest_data.metadata.namespace == "kube-system"
+      - kube_vip_manifest_data.spec.hostNetwork | bool
+      - kube_vip_manifest_data.spec.containers[0].name == "kube-vip"
+      - kube_vip_manifest_data.spec.containers[0].image == kube_vip_image
+    success_msg: >-
+      The kube-vip manifest is valid YAML and contains
+      the expected Pod configuration.
+    fail_msg: >-
+      The kube-vip manifest is missing one or more
+      required configuration values.
+
+# Step 10: Display the configuration summary.
+- name: Display kube-vip preparation summary
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ inventory_hostname }}"
+      - "Image: {{ kube_vip_image }}"
+      - "Interface: {{ kube_vip_interface }}"
+      - "VIP: {{ control_plane_vip }}"
+      - "API endpoint: {{ control_plane_endpoint_name }}:{{ control_plane_port }}"
+      - "Manifest: {{ kube_vip_manifest_path }}"
+      - "Validation: YAML parsed successfully"
