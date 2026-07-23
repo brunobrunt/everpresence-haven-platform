@@ -420,6 +420,34 @@ The configuration is validated using:
 kubeadm config validate \
   --config /etc/kubernetes/kubeadm-init.yaml
 ```
+### kubeadm Preflight Validation
+
+Before initializing the first control-plane node, run kubeadm’s preflight checks:
+
+```bash
+ansible eph-cp01 -b -m command -a \
+  "kubeadm init phase preflight --config /etc/kubernetes/kubeadm-init.yaml"
+```
+
+This command checks whether `eph-cp01` is ready for cluster initialization.
+
+It validates items such as:
+
+* CPU and memory
+* Swap status
+* Required ports
+* CRI-O connectivity
+* Kubernetes configuration
+* Required system files
+* Network prerequisites
+
+This command does not create the cluster. It only checks for problems that could cause `kubeadm init` to fail.
+
+```text
+kubeadm init phase preflight = check readiness
+kubeadm init                 = create the control plane
+```
+
 
 ## Pre-pulling Kubernetes Images
 
