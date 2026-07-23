@@ -241,7 +241,288 @@ net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 ```
 
-### 4. CRI-O Container Runtime
+### 4.CRI-O Container Runtime
+
+CRI-O is the container runtime used by the Kubernetes nodes in this project.
+
+Kubernetes does not run application containers by itself. It asks a container runtime such as CRI-O to:
+
+* Download container images
+* Create Pod sandboxes
+* Start and stop containers
+* Report container status
+* Provide container logs
+* Manage container storage and networking integration
+
+CRI-O communicates with Kubernetes through the Container Runtime Interface, commonly called CRI.
+
+### Installation Playbook
+
+The CRI-O installation playbook is:
+
+```text
+playbooks/install_crio.yml
+```
+
+Run it from the Ansible directory:
+
+```bash
+ansible-playbook playbooks/install_crio.yml
+```
+
+The playbook calls the `crio` role:
+
+```text
+roles/crio/
+├── tasks/
+│   └── main.yml
+└── handlers/
+    └── main.yml
+```
+
+The role performs the following actions:
+
+1. Installs repository requirements.
+2. Adds the official CRI-O repository.
+3. Installs CRI-O.
+4. Enables and starts the CRI-O service.
+5. Installs `crictl`.
+6. Configures `crictl` to communicate with CRI-O.
+7. Configures the Kubernetes pause image.
+8. Validates the CRI-O service and socket.
+
+### CRI-O Version
+
+This project uses the CRI-O minor version that matches Kubernetes:
+
+```text
+Kubernetes: v1.36
+CRI-O:      v1.36
+```
+
+Keeping the Kubernetes and CRI-O minor versions aligned helps maintain compatibility.
+
+The version is defined in:
+
+```text
+inventory/group_vars/all.yml
+```
+
+Example:
+
+```yaml
+kubernetes_minor_version: "v1.36"
+crio_version: "v1.36"
+crictl_version: "v1.36.0"
+```
+
+### CRI-O Service
+
+Check the CRI-O service on all nodes:
+
+```bash
+ansible all -b -m command -a "systemctl is-active crio"
+```
+
+Expected output from every node:
+
+```text
+active
+```
+
+Check whether CRI-O starts automatically after reboot:
+
+```bash
+ansible all -b -m command -a "systemctl is-enabled crio"
+```
+
+Expected:
+
+```text
+enabled
+```
+
+### CRI-O Socket
+
+Kubernetes communicates with CRI-O through this Unix socket:
+
+```text
+/run/crio/crio.sock
+```
+
+The Ansible variable contains the full socket address:
+
+```yaml
+crio_socket: "unix:///run/crio/crio.sock"
+```
+
+This socket is used by:
+
+* `kubeadm`
+* `kubelet`
+* `crictl`
+
+Check that the socket exists:
+
+```bash
+ansible all -b -m stat -a "path=/run/crio/crio.sock"
+```
+
+Look for:
+
+```text
+"exists": true
+"issock": true
+```
+
+### crictl
+
+`crictl` is a command-line tool used to inspect and troubleshoot CRI-compatible container runtimes.
+
+It is similar to using Docker commands, but it communicates directly with CRI-O.
+
+The configuration file is:
+
+```text
+/etc/crictl.yaml
+```
+
+Its contents should resemble:
+
+```yaml
+runtime-endpoint: unix:///run/crio/crio.sock
+image-endpoint: unix:///run/crio/crio.sock
+timeout: 10
+debug: false
+```
+
+Test communication with CRI-O:
+
+```bash
+ansible all -b -m command -a "crictl info"
+```
+
+List downloaded images:
+
+```bash
+ansible eph-cp01 -b -m command -a "crictl images"
+```
+
+List running containers:
+
+```bash
+ansible eph-cp01 -b -m command -a "crictl ps"
+```
+
+### Pause Image
+
+The pause image creates the shared network environment for each Kubernetes Pod.
+
+Application containers inside the same Pod share the network namespace created by the pause container.
+
+The project configures CRI-O to use:
+
+```text
+registry.k8s.io/pause:3.10.2
+```
+
+The setting is stored in:
+
+```text
+/etc/crio/crio.conf.d/10-pause-image.conf
+```
+
+Expected contents:
+
+```toml
+[crio.image]
+pause_image = "registry.k8s.io/pause:3.10.2"
+```
+
+Verify the pause-image configuration on all nodes:
+
+```bash
+ansible all -b -m command -a \
+  "cat /etc/crio/crio.conf.d/10-pause-image.conf"
+```
+
+This command:
+
+* Targets all five Kubernetes nodes.
+* Uses `sudo` through the `-b` option.
+* Reads the custom CRI-O configuration file.
+* Confirms that every node uses the same pause image as kubeadm.
+
+Using the same pause-image version in CRI-O and kubeadm prevents the sandbox-image mismatch warning during kubeadm preflight validation.
+
+### Validate CRI-O Versions
+
+Check the CRI-O version:
+
+```bash
+ansible all -b -m command -a "crio --version"
+```
+
+Check the `crictl` version:
+
+```bash
+ansible all -b -m command -a "crictl --version"
+```
+
+Expected versions should match the variables defined in:
+
+```text
+inventory/group_vars/all.yml
+```
+
+### Test on One Node First
+
+Before applying major CRI-O changes to every node, test on the first control-plane node:
+
+```bash
+ansible-playbook playbooks/install_crio.yml --limit eph-cp01
+```
+
+After the test succeeds, apply the role to all nodes:
+
+```bash
+ansible-playbook playbooks/install_crio.yml
+```
+
+### Idempotency
+
+Run the CRI-O playbook a second time:
+
+```bash
+ansible-playbook playbooks/install_crio.yml
+```
+
+The second run should ideally show:
+
+```text
+changed=0
+unreachable=0
+failed=0
+```
+
+This confirms that the CRI-O role is idempotent and does not make unnecessary changes when the desired configuration is already present.
+
+### Useful CRI-O Validation Commands
+
+```bash
+ansible all -b -m command -a "systemctl is-active crio"
+
+ansible all -b -m command -a "systemctl is-enabled crio"
+
+ansible all -b -m command -a "crio --version"
+
+ansible all -b -m command -a "crictl --version"
+
+ansible all -b -m command -a "crictl info"
+
+ansible all -b -m command -a \
+  "cat /etc/crio/crio.conf.d/10-pause-image.conf"
+```
 
 Playbook:
 
